@@ -1,7 +1,7 @@
 #INSTALL:= C:/intelFPGA_lite/24.1std
 INSTALL := $(QUARTUS_ROOTDIR)/..
 
-MAIN	:= vga.c
+MAIN	:= tron_game_vga.c
 HDRS	:= address_map_niosv.h
 SRCS	:= $(MAIN) 
 
