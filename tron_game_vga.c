@@ -1,4 +1,3 @@
-// #include <unistd.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,6 +14,61 @@ const pixel_t wht = 0xffff;
 const pixel_t red = 0xf800;
 const pixel_t grn = 0x07e0;
 const pixel_t blu = 0x001f;
+
+uint8_t hexDecoder(int score)
+{
+	if(score < 0)
+		score = 0;
+	if(score > 9)
+		score = 9;
+
+	uint8_t disp_val;
+
+	switch(score)
+	{
+		case 0: 
+			disp_val = 0xbf;
+			break;
+		case 1: 
+			disp_val = 0x86;
+			break;
+		case 2: 
+			disp_val = 0xdb;
+			break;
+		case 3: 
+			disp_val = 0xcf;
+			break;
+		case 4: 
+			disp_val = 0xe6;
+			break;
+		case 5: 
+			disp_val = 0xed;
+			break;
+		case 6: 
+			disp_val = 0xfd;
+			break;
+		case 7: 
+			disp_val = 0x87;
+			break;
+		case 8: 
+			disp_val = 0xff;
+			break;
+		case 9: 
+			disp_val = 0xe7;
+			break;
+		default: 
+			disp_val = 0x80;
+			break;
+	}
+
+	disp_val &= 0x7f;           // I want to turn off the decimal point so i force the 8th bit OFF
+	return disp_val;            // example: 1101_1011 & 0111_1111 = 0101_1011 (8th bit is OFF) 
+}
+
+void updateHex()
+{
+
+}
 
 void delay( int N )
 {
@@ -160,20 +214,19 @@ void updateBot(player *p)
 		p -> dir_x = dx;
 	}
 
-	else if(botCollision(p, ldy, ldx, look_ahead) == false)
+	else if(botCollision(p, ldy, ldx, look_ahead) == false)        // case 2: go left 
 	{
 		p -> dir_y = ldy;
 		p -> dir_x = ldx;
 	}
 
-	else if(botCollision(p, rdy, rdx, look_ahead) == false)
+	else if(botCollision(p, rdy, rdx, look_ahead) == false)        // case 3: go right
 	{
 		p -> dir_y = rdy;
 		p -> dir_x = rdx;
 	}
+	                                                         // case 4: no safe options bot will just collide
 }
-
-
 	
 void updatePlayer(player *p)
 {
@@ -227,6 +280,9 @@ void resetRound(game *g)
 }
 int main()
 {	
+	volatile uint32_t *hex0 = (uint32_t*)HEX3_HEX0_BASE;
+	*hex0 = hexDecoder(2);
+	
 	rect(0, MAX_Y, 0, MAX_X, wht);     
 	rect(5, MAX_Y - 5, 5, MAX_X - 5, blk );  
 	
@@ -267,7 +323,3 @@ int main()
 	
 	return 0;
 }
-
-
-// see if this shows up 
-// check again
