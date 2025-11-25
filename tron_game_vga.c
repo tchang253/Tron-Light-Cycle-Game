@@ -3,6 +3,94 @@
 #include <stdint.h>
 #include "address_map_niosv.h"
 
+#define _GNU_SOURCE
+#define CLOCK_SPEED 50000000
+#define FPS 10
+#define PERIOD (CLOCK_SPEED / FPS)
+
+#define GLOBAL_MIE 0x8
+#define MTIME_MIE 0x80
+#define EXTERNAL_MIE 0x800
+
+
+// mtime_ptr + 0 -> mtime_lo    -> lower 32 bits of mtime counter      (MTIMER_BASE + 0)
+// mtime_ptr + 1 -> mtime_hi    -> upper 32 bits of mtime counter      (MTIMER_BASE + 4)
+// mtime_ptr + 2 -> mtimecmp_lo -> lower 32 bits of mtimecmp value     (MTIMER_BASE + 8)
+// mtime_ptr + 3 -> mtimecmp_hi -> upper 32 bits of mtimecmp value     (MTIMER_BASE + 12)
+
+volatile int flag = 0;
+volatile uint32_t *mtime_ptr = (uint32_t*)MTIMER_BASE;
+volatile uint32_t *ledr_ptr = (uint32_t*)LEDR_BASE;          // for debugging
+
+uint64_t read_mtime(volatile uint32_t *time_ptr)
+{
+	uint32_t mtime_hi;
+	uint32_t mtime_lo;
+	uint64_t mtime;
+
+	do 
+	{
+		mtime_hi = *(time_ptr + 1);
+		mtime_lo = *(time_ptr);
+	} while(mtime_hi != *(time_ptr + 1));
+
+	return mtime = ((uint64_t)mtime_hi << 32) | mtime_lo;
+}
+
+void set_mtime(volatile uint32_t *time_ptr, uint64_t mtime)
+{
+	*(time_ptr) = 0;            // temporarily set the mtime_lo to 0 to prevent potential roll-over during reading. 
+
+	*(time_ptr + 1) = (uint32_t)(mtime >> 32);         // set mtime_hi by shifting 32 bits down then casting as a 32 bit number
+
+	*(time_ptr) = (uint32_t)mtime;                     // set mtime_lo 
+}
+
+void setup_mtimecmp()
+{
+	uint64_t mtime_now, mtime_next;
+
+	mtime_now = read_mtime(mtime_ptr);
+	mtime_next = mtime_now + PERIOD;
+
+	set_mtime(mtime_ptr + 2, mtime_next);              // writes both mtimecmp_hi & mtimecmp_lo into the registers 
+}
+
+void mtime_ISR()
+{
+	uint64_t mtimecmp;
+	mtimecmp = read_mtime(mtime_ptr + 2);       // reading the current mtimecmp_hi & mtimecmp_lo values into mtimecmp variable
+
+	mtimecmp += PERIOD;                   // next mtimecmp value = one period later in the future
+
+	set_mtime(mtime_ptr + 2, mtimecmp);       // set the next mtimecmp value
+
+	*ledr_ptr ^= 0x1;
+
+	flag = 1;
+}
+
+void handler(void) __attribute__ ((interrupt("machine")));
+
+void handler(void)
+{
+	uint32_t mcause_val;
+
+	__asm__ volatile("csrr %0, mcause" : "=r"(mcause_val));         // reads the mcause_val into 
+
+	if(mcause_val == 0x80000007)
+		mtime_ISR();
+}
+
+void cpu_irq(uint32_t mask)
+{
+	__asm__ volatile("csrw mtvec, %0" :: "r"(handler));
+
+	__asm__ volatile("csrs mie, %0" :: "r"(mask));
+
+	__asm__ volatile("csrs mstatus, %0" :: "r"(GLOBAL_MIE));
+}
+
 typedef uint16_t pixel_t;
 typedef uint32_t device;
 device prev_key = 0x0;
@@ -94,13 +182,13 @@ void updateHex(const game *g)         // only READING not modifying the game str
 
 	*hex = hex_value;
 }
-
-void delay( int N )
+/*
+void delay(int N)
 {
 	for( int i=0; i<N; i++ ) 
 		*pVGA; // read volatile memory location to waste time
 }
-
+*/
 void drawPixel( int y, int x, pixel_t colour )
 {
 	*(pVGA + (y<<YSHIFT) + x ) = colour;
@@ -298,8 +386,14 @@ void winScreen(const game *g)
 
 	rect(0, MAX_Y, 0, MAX_X, win_colour);
 }
+
+
 int main()
 {	
+
+	setup_mtimecmp();
+	cpu_irq(MTIME_MIE);
+
 	rect(0, MAX_Y, 0, MAX_X, wht);     
 	rect(5, MAX_Y - 5, 5, MAX_X - 5, blk );  
 	
@@ -312,33 +406,38 @@ int main()
 	
 	while(tronGame.gameOver != true)
 	{
-		updatePlayer(&tronGame.user);
-		updateBot(&tronGame.bot);
+		if(flag == 1)
+		{
+			flag = 0;
+			updatePlayer(&tronGame.user);
+		    updateBot(&tronGame.bot);
 		
-		if((tronGame.user.alive == true) && (collisionDetection(&tronGame.user) == false))
-			movePlayer(&tronGame.user);
+			if((tronGame.user.alive == true) && (collisionDetection(&tronGame.user) == false))
+				movePlayer(&tronGame.user);
 		
-		if((tronGame.bot.alive == true) && (collisionDetection(&tronGame.bot) == false))
-			movePlayer(&tronGame.bot);
+			if((tronGame.bot.alive == true) && (collisionDetection(&tronGame.bot) == false))
+				movePlayer(&tronGame.bot);
 		
-		if((tronGame.user.alive == false) || (tronGame.bot.alive == false))
-			{
-				tronGame.roundOver = true;
+			if((tronGame.user.alive == false) || (tronGame.bot.alive == false))
+				{
+					tronGame.roundOver = true;
 
-				if(tronGame.user.alive == false && tronGame.bot.alive == true)
-					tronGame.botScore ++;
+					if(tronGame.user.alive == false && tronGame.bot.alive == true)
+						tronGame.botScore ++;
 
-				else if(tronGame.user.alive == true && tronGame.bot.alive == false)
-					tronGame.userScore ++;
+					else if(tronGame.user.alive == true && tronGame.bot.alive == false)
+						tronGame.userScore ++;
 
-				updateHex(&tronGame);
+					updateHex(&tronGame);
 			
-		    	if(tronGame.userScore >= 9 || tronGame.botScore >= 9)
-					tronGame.gameOver = true;
-		    	else
-					resetRound(&tronGame);
-			}	
-		delay(1000000);
+		    		if(tronGame.userScore >= 9 || tronGame.botScore >= 9)
+						tronGame.gameOver = true;
+		    		else
+						resetRound(&tronGame);
+				}	
+			// delay(1000000);
+		}
+		
 	}
 	winScreen(&tronGame);
 	return 0;
