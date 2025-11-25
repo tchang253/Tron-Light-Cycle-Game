@@ -3,15 +3,13 @@
 #include <stdint.h>
 #include "address_map_niosv.h"
 
-#define _GNU_SOURCE
 #define CLOCK_SPEED 50000000
 #define FPS 10
 #define PERIOD (CLOCK_SPEED / FPS)
 
 #define GLOBAL_MIE 0x8
 #define MTIME_MIE 0x80
-#define EXTERNAL_MIE 0x800
-
+#define EXTERNAL_MIE 0x800       // not needed i dont think
 
 // mtime_ptr + 0 -> mtime_lo    -> lower 32 bits of mtime counter      (MTIMER_BASE + 0)
 // mtime_ptr + 1 -> mtime_hi    -> upper 32 bits of mtime counter      (MTIMER_BASE + 4)
@@ -20,7 +18,8 @@
 
 volatile int flag = 0;
 volatile uint32_t *mtime_ptr = (uint32_t*)MTIMER_BASE;
-volatile uint32_t *ledr_ptr = (uint32_t*)LEDR_BASE;          // for debugging
+volatile uint32_t *ledr_ptr = (uint32_t*)LEDR_BASE;          // for debugging 
+volatile uint32_t key_val = 0;
 
 uint64_t read_mtime(volatile uint32_t *time_ptr)
 {
@@ -65,7 +64,10 @@ void mtime_ISR()
 
 	set_mtime(mtime_ptr + 2, mtimecmp);       // set the next mtimecmp value
 
-	*ledr_ptr ^= 0x1;
+	volatile uint32_t *key_ptr = (uint32_t*)KEY_BASE;
+	key_val = *key_ptr;
+	
+	*ledr_ptr ^= 0x1;    // for debugging
 
 	flag = 1;
 }
@@ -84,7 +86,7 @@ void handler(void)
 
 void cpu_irq(uint32_t mask)
 {
-	__asm__ volatile("csrw mtvec, %0" :: "r"(handler));
+	__asm__ volatile("csrw mtvec, %0" :: "r"(handler));    
 
 	__asm__ volatile("csrs mie, %0" :: "r"(mask));
 
@@ -325,8 +327,9 @@ void updateBot(player *p)
 	
 void updatePlayer(player *p)
 {
-	volatile device *button = (device*)KEY_BASE;
-	device curr_key = *button;
+	//volatile device *button = (device*)KEY_BASE;
+	//device curr_key = *button;
+	device curr_key = key_val;          //wtf do i do here
 	// key0 CCW
 	// (y,x) = (-y, x)
 	// key1 CW
