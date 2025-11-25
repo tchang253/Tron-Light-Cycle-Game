@@ -15,6 +15,7 @@ const pixel_t red = 0xf800;
 const pixel_t grn = 0x07e0;
 const pixel_t blu = 0x001f;
 const pixel_t mgt = 0xf81f;
+const pixel_t ylw = 0xffe0;
 
 pixel_t makePixel( uint8_t r8, uint8_t g8, uint8_t b8 )
 {
@@ -163,12 +164,11 @@ void game_init(game *g)
 	g -> botScore = 0;
 	g -> roundOver = false;
 	g -> gameOver = false;
+
 	drawObstacles();
 
 	player_init(&g -> user, MAX_Y/2, MAX_X/3, 0, 1, blu);      // starting the user on the left side of the screen
-	
-	pixel_t yellow = makePixel(255, 255, 0);
-	player_init(&g -> bot, MAX_Y/2, (2*MAX_X)/3, 0, -1, yellow);    // starting the bot on the right side of the screen
+	player_init(&g -> bot, MAX_Y/2, (2*MAX_X)/3, 0, -1, ylw);    // starting the bot on the right side of the screen
 }
 
 
@@ -278,13 +278,25 @@ void resetRound(game *g)
 	drawObstacles();
 
 	player_init(&g -> user, MAX_Y/2, MAX_X/3, 0, 1, blu);
-	pixel_t yellow = makePixel(255,255,0);
-	player_init(&g -> bot, MAX_Y/2, 2*(MAX_X)/3, 0, -1, yellow);
+	player_init(&g -> bot, MAX_Y/2, 2*(MAX_X)/3, 0, -1, ylw);
 
 	drawPixel(g -> user.curr_y, g -> user.curr_x, g -> user.colour);
 	drawPixel(g -> bot.curr_y, g -> bot.curr_x, g -> bot.colour);
 
 	g -> roundOver = false;
+}
+
+void winScreen(const game *g)
+{
+	pixel_t win_colour;
+
+	if(g -> userScore > g -> botScore)
+		win_colour = blu;
+	
+	if(g -> userScore < g -> botScore)
+		win_colour = ylw;
+
+	rect(0, MAX_Y, 0, MAX_X, win_colour);
 }
 int main()
 {	
@@ -328,6 +340,6 @@ int main()
 			}	
 		delay(1000000);
 	}
-	
+	winScreen(&tronGame);
 	return 0;
 }
