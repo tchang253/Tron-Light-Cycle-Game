@@ -14,6 +14,16 @@ const pixel_t wht = 0xffff;
 const pixel_t red = 0xf800;
 const pixel_t grn = 0x07e0;
 const pixel_t blu = 0x001f;
+const pixel_t mgt = 0xf81f;
+
+pixel_t makePixel( uint8_t r8, uint8_t g8, uint8_t b8 )
+{
+	// inputs: 8b of each: red, green, blue
+	const uint16_t r5 = (r8 & 0xf8)>>3; // keep 5b red
+	const uint16_t g6 = (g8 & 0xfc)>>2; // keep 6b green
+	const uint16_t b5 = (b8 & 0xf8)>>3; // keep 5b blue
+	return (pixel_t)( (r5<<11) | (g6<<5) | b5 );
+}
 
 typedef struct player {
 	int curr_x, curr_y;
@@ -22,7 +32,7 @@ typedef struct player {
 	pixel_t colour;
 } player;
 
-typedef struct game{
+typedef struct game {
 	player user;
 	player bot;
 	int userScore;
@@ -30,7 +40,20 @@ typedef struct game{
 	bool roundOver;
 	bool gameOver;
 } game;
-	
+
+typedef struct obstacle_t {
+	int y1, y2;
+	int x1, x2;
+	pixel_t colour;
+} obstacle_t;
+
+#define NUM_OBS 3
+obstacle_t obstacles[NUM_OBS] = {
+	{30, 50, 50, 60, red},
+	{70, 80, 20, 80, grn},
+	{40, 60, 100, 110, mgt}
+};
+
 uint8_t hexDecoder(int score)
 {
 	if(score < 0)
@@ -82,15 +105,6 @@ void drawPixel( int y, int x, pixel_t colour )
 	*(pVGA + (y<<YSHIFT) + x ) = colour;
 }
 
-pixel_t makePixel( uint8_t r8, uint8_t g8, uint8_t b8 )
-{
-	// inputs: 8b of each: red, green, blue
-	const uint16_t r5 = (r8 & 0xf8)>>3; // keep 5b red
-	const uint16_t g6 = (g8 & 0xfc)>>2; // keep 6b green
-	const uint16_t b5 = (b8 & 0xf8)>>3; // keep 5b blue
-	return (pixel_t)( (r5<<11) | (g6<<5) | b5 );
-}
-
 void rect( int y1, int y2, int x1, int x2, pixel_t c )
 {
 	for( int y=y1; y<y2; y++ )
@@ -135,6 +149,13 @@ void player_init(player *p, int start_y, int start_x, int dir_y, int dir_x, pixe
 	p -> colour = colour;
 	p -> alive = true;
 }
+void drawObstacles()
+{
+	for(int i = 0; i < NUM_OBS; i++)
+	{
+		rect(obstacles[i].y1, obstacles[i].y2, obstacles[i].x1, obstacles[i].x2, obstacles[i].colour);
+	}
+}
 
 void game_init(game *g)
 {
@@ -142,7 +163,8 @@ void game_init(game *g)
 	g -> botScore = 0;
 	g -> roundOver = false;
 	g -> gameOver = false;
-	
+	drawObstacles();
+
 	player_init(&g -> user, MAX_Y/2, MAX_X/3, 0, 1, blu);      // starting the user on the left side of the screen
 	
 	pixel_t yellow = makePixel(255, 255, 0);
@@ -253,6 +275,7 @@ void updatePlayer(player *p)
 void resetRound(game *g)
 {
 	rect(5, MAX_Y - 5, 5, MAX_X - 5, blk);
+	drawObstacles();
 
 	player_init(&g -> user, MAX_Y/2, MAX_X/3, 0, 1, blu);
 	pixel_t yellow = makePixel(255,255,0);
