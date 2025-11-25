@@ -15,6 +15,22 @@ const pixel_t red = 0xf800;
 const pixel_t grn = 0x07e0;
 const pixel_t blu = 0x001f;
 
+typedef struct player {
+	int curr_x, curr_y;
+	int dir_x, dir_y;
+	bool alive; 
+	pixel_t colour;
+} player;
+
+typedef struct game{
+	player user;
+	player bot;
+	int userScore;
+	int botScore;
+	bool roundOver;
+	bool gameOver;
+} game;
+	
 uint8_t hexDecoder(int score)
 {
 	if(score < 0)
@@ -22,52 +38,37 @@ uint8_t hexDecoder(int score)
 	if(score > 9)
 		score = 9;
 
-	uint8_t disp_val;
-
 	switch(score)
 	{
-		case 0: 
-			disp_val = 0xbf;
-			break;
-		case 1: 
-			disp_val = 0x86;
-			break;
-		case 2: 
-			disp_val = 0xdb;
-			break;
-		case 3: 
-			disp_val = 0xcf;
-			break;
-		case 4: 
-			disp_val = 0xe6;
-			break;
-		case 5: 
-			disp_val = 0xed;
-			break;
-		case 6: 
-			disp_val = 0xfd;
-			break;
-		case 7: 
-			disp_val = 0x87;
-			break;
-		case 8: 
-			disp_val = 0xff;
-			break;
-		case 9: 
-			disp_val = 0xe7;
-			break;
-		default: 
-			disp_val = 0x80;
-			break;
+		case 0: return 0x3f;
+		case 1: return 0x06;
+		case 2: return 0x5b;
+		case 3: return 0x4f;
+		case 4: return 0x66;
+		case 5: return 0x6d;
+		case 6: return 0x7d;
+		case 7: return 0x07;
+		case 8: return 0x7f;
+		case 9: return 0x67;
+		default: return 0x00;
 	}
 
-	disp_val &= 0x7f;           // I want to turn off the decimal point so i force the 8th bit OFF
-	return disp_val;            // example: 1101_1011 & 0111_1111 = 0101_1011 (8th bit is OFF) 
+	// disp_val &= 0x7f;           // I want to turn off the decimal point so i force the 8th bit OFF
+	// return disp_val;            // example: 1101_1011 & 0111_1111 = 0101_1011 (8th bit is OFF) 
 }
 
-void updateHex()
+void updateHex(const game *g)         // only READING not modifying the game struct
 {
+	volatile uint32_t *hex = (uint32_t*)HEX3_HEX0_BASE;
+	uint8_t bot_hex = hexDecoder(g -> botScore);
+	uint8_t user_hex = hexDecoder(g -> userScore);
 
+	uint32_t hex_value = 0;
+
+	hex_value |= bot_hex;
+	hex_value |= ((uint32_t)user_hex << 16);
+
+	*hex = hex_value;
 }
 
 void delay( int N )
@@ -97,22 +98,6 @@ void rect( int y1, int y2, int x1, int x2, pixel_t c )
 			drawPixel( y, x, c );
 }
 
-typedef struct player {
-	int curr_x, curr_y;
-	int dir_x, dir_y;
-	bool alive; 
-	pixel_t colour;
-} player;
-
-typedef struct game{
-	player user;
-	player bot;
-	int userScore;
-	int botScore;
-	bool roundOver;
-	bool gameOver;
-} game;
-	
 pixel_t readPixel(int y, int x)
 {
 	return *(pVGA +(y << YSHIFT) + x);
@@ -280,14 +265,12 @@ void resetRound(game *g)
 }
 int main()
 {	
-	volatile uint32_t *hex0 = (uint32_t*)HEX3_HEX0_BASE;
-	*hex0 = hexDecoder(2);
-	
 	rect(0, MAX_Y, 0, MAX_X, wht);     
 	rect(5, MAX_Y - 5, 5, MAX_X - 5, blk );  
 	
 	game tronGame;                         // create an instance of game "tronGame"
 	game_init(&tronGame);
+	updateHex(&tronGame);
 	
 	drawPixel(tronGame.user.curr_y, tronGame.user.curr_x, tronGame.user.colour);
 	drawPixel(tronGame.bot.curr_y, tronGame.bot.curr_x, tronGame.bot.colour);
@@ -312,6 +295,8 @@ int main()
 
 				else if(tronGame.user.alive == true && tronGame.bot.alive == false)
 					tronGame.userScore ++;
+
+				updateHex(&tronGame);
 			
 		    	if(tronGame.userScore >= 9 || tronGame.botScore >= 9)
 					tronGame.gameOver = true;
