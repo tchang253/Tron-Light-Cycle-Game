@@ -3,24 +3,55 @@
 #include <stdint.h>
 #include "address_map_niosv.h"
 
-#define _GNU_SOURCE
 #define CLOCK_SPEED 50000000
-#define FPS 10
-#define PERIOD (CLOCK_SPEED / FPS)
 
 #define GLOBAL_MIE 0x8
 #define MTIME_MIE 0x80
-#define EXTERNAL_MIE 0x800
-
+#define EXTERNAL_MIE 0x00040000
 
 // mtime_ptr + 0 -> mtime_lo    -> lower 32 bits of mtime counter      (MTIMER_BASE + 0)
 // mtime_ptr + 1 -> mtime_hi    -> upper 32 bits of mtime counter      (MTIMER_BASE + 4)
 // mtime_ptr + 2 -> mtimecmp_lo -> lower 32 bits of mtimecmp value     (MTIMER_BASE + 8)
 // mtime_ptr + 3 -> mtimecmp_hi -> upper 32 bits of mtimecmp value     (MTIMER_BASE + 12)
 
+// key_ptr + 0 -> data register                   (KEY_BASE + 0)
+// key_ptr + 1 -> direction register              (KEY_BASE + 4)
+// key_ptr + 2 -> enable specific key interrupts  (KEY_BASE + 8)
+// key_ptr + 3 -> clear edges                     (KEY_BASE + 12)
+
 volatile int flag = 0;
+volatile int key_flag = 0;
+volatile uint64_t period = 0;
+
 volatile uint32_t *mtime_ptr = (uint32_t*)MTIMER_BASE;
-volatile uint32_t *ledr_ptr = (uint32_t*)LEDR_BASE;          // for debugging
+volatile uint32_t *ledr_ptr = (uint32_t*)LEDR_BASE;         
+volatile uint32_t *key_ptr = (uint32_t*)KEY_BASE;      
+volatile uint32_t *sw_ptr = (uint32_t*)SW_BASE;     
+
+void update_gamespeed()
+{
+	int fps;
+
+	uint32_t sw = *sw_ptr;
+	sw &= 0xf; 
+
+	if(sw == 0) 
+		fps = 1; 
+	
+	else if(sw == 1)
+		fps = 5;
+	
+	else if(sw == 2)
+		fps = 10;
+	
+	else if(sw == 3)
+		fps = 15;
+	
+	else
+		fps = 15;
+
+	period = CLOCK_SPEED / fps;
+}
 
 uint64_t read_mtime(volatile uint32_t *time_ptr)
 {
@@ -51,7 +82,7 @@ void setup_mtimecmp()
 	uint64_t mtime_now, mtime_next;
 
 	mtime_now = read_mtime(mtime_ptr);
-	mtime_next = mtime_now + PERIOD;
+	mtime_next = mtime_now + period;
 
 	set_mtime(mtime_ptr + 2, mtime_next);              // writes both mtimecmp_hi & mtimecmp_lo into the registers 
 }
@@ -61,13 +92,67 @@ void mtime_ISR()
 	uint64_t mtimecmp;
 	mtimecmp = read_mtime(mtime_ptr + 2);       // reading the current mtimecmp_hi & mtimecmp_lo values into mtimecmp variable
 
-	mtimecmp += PERIOD;                   // next mtimecmp value = one period later in the future
+	mtimecmp += period;                   // next mtimecmp value = one period later in the future
 
 	set_mtime(mtime_ptr + 2, mtimecmp);       // set the next mtimecmp value
 
-	*ledr_ptr ^= 0x1;
+	//*ledr_ptr ^= 0x1;
 
 	flag = 1;
+}
+
+void setup_key_ISR()
+{
+	volatile uint32_t *key_dir = key_ptr + 1;
+	volatile uint32_t *key_mask = key_ptr + 2;
+	volatile uint32_t *key_edge = key_ptr + 3;
+
+	*key_dir = 0x0;    // 0 indicates input 
+	*key_mask = 0x3;
+	*key_edge = 0xff;
+}
+void key_ISR()
+{
+	uint32_t key_val = *(key_ptr + 3);                       // reading from edge capture register only 
+
+	int key0 = key_val & 0x1;
+	int key1 = key_val & 0x2;
+
+	if(key0 && !key1)
+	{	
+		if(key_flag == -1)
+		{
+			key_flag = 0;
+			*ledr_ptr &= ~0x1;
+		}
+		else
+		{
+			key_flag = -1;
+			*ledr_ptr |= 0x1;
+		}
+	}
+
+	else if(!key0 && key1)
+	{
+		if(key_flag == 1)
+		{
+			key_flag = 0;
+			*ledr_ptr &= ~0x2;
+		}
+		else
+		{
+			key_flag = 1;
+			*ledr_ptr |= 0x2;
+		}
+	}
+
+	else if((key0 && key1) || (!key0 && !key1))
+	{
+		key_flag = 0;
+		*ledr_ptr &= ~0x3;
+	}
+
+	*(key_ptr + 3) = key_val;                              // writing back to edge capture register to clear the edges (read/write 1 to clear) wtf? 
 }
 
 void handler(void) __attribute__ ((interrupt("machine")));
@@ -80,6 +165,9 @@ void handler(void)
 
 	if(mcause_val == 0x80000007)
 		mtime_ISR();
+
+	else if(mcause_val == 0x80000012)
+		key_ISR();
 }
 
 void cpu_irq(uint32_t mask)
@@ -138,9 +226,9 @@ typedef struct obstacle_t {
 
 #define NUM_OBS 3
 obstacle_t obstacles[NUM_OBS] = {
-	{30, 50, 50, 60, red},
-	{70, 80, 20, 80, grn},
-	{40, 60, 100, 110, mgt}
+	{30, 50, 50, 60, wht},
+	{70, 80, 20, 80, wht},
+	{40, 60, 100, 110, wht}
 };
 
 uint8_t hexDecoder(int score)
@@ -182,13 +270,7 @@ void updateHex(const game *g)         // only READING not modifying the game str
 
 	*hex = hex_value;
 }
-/*
-void delay(int N)
-{
-	for( int i=0; i<N; i++ ) 
-		*pVGA; // read volatile memory location to waste time
-}
-*/
+
 void drawPixel( int y, int x, pixel_t colour )
 {
 	*(pVGA + (y<<YSHIFT) + x ) = colour;
@@ -322,44 +404,28 @@ void updateBot(player *p)
 	}
 	                                                         // case 4: no safe options bot will just collide
 }
-	
+
 void updatePlayer(player *p)
 {
-	volatile device *button = (device*)KEY_BASE;
-	device curr_key = *button;
-	// key0 CCW
-	// (y,x) = (-y, x)
-	// key1 CW
-	// (y,x) = (y,-x)
-	int prev_y;
-	int prev_x;
-	
-	int prev0 = (prev_key & 0x1);
-	int curr0 = (curr_key & 0x1);
-	
-	int prev1 = (prev_key & 0x2);
-	int curr1 = (curr_key & 0x2);
-	
-	if((!prev0 && curr0) == 1)
+	int prev_y = p -> dir_y;
+	int prev_x = p -> dir_x;
+
+	if(key_flag == -1)
 	{
-		prev_y = p -> dir_y;
-		prev_x = p -> dir_x;
-		
 		p -> dir_y = -prev_x;
 		p -> dir_x = prev_y;
 	}
 	
-	if((!prev1 && curr1) == 1)
+	if(key_flag == 1)
 	{
-		prev_y = p -> dir_y;
-		prev_x = p -> dir_x;
-		
 		p -> dir_y = prev_x;
 		p -> dir_x = -prev_y;
 	}
-	
-	prev_key = curr_key;
+
+	*ledr_ptr = 0x0;
+	key_flag = 0;
 }
+
 void resetRound(game *g)
 {
 	rect(5, MAX_Y - 5, 5, MAX_X - 5, blk);
@@ -390,9 +456,11 @@ void winScreen(const game *g)
 
 int main()
 {	
-
+	update_gamespeed();
 	setup_mtimecmp();
-	cpu_irq(MTIME_MIE);
+	setup_key_ISR();
+
+	cpu_irq(MTIME_MIE | EXTERNAL_MIE);
 
 	rect(0, MAX_Y, 0, MAX_X, wht);     
 	rect(5, MAX_Y - 5, 5, MAX_X - 5, blk );  
@@ -409,8 +477,13 @@ int main()
 		if(flag == 1)
 		{
 			flag = 0;
+			update_gamespeed();
 			updatePlayer(&tronGame.user);
 		    updateBot(&tronGame.bot);
+
+			uint32_t pause = *sw_ptr;
+			if(pause & (1<<9))
+				continue;
 		
 			if((tronGame.user.alive == true) && (collisionDetection(&tronGame.user) == false))
 				movePlayer(&tronGame.user);
@@ -435,9 +508,7 @@ int main()
 		    		else
 						resetRound(&tronGame);
 				}	
-			// delay(1000000);
 		}
-		
 	}
 	winScreen(&tronGame);
 	return 0;
